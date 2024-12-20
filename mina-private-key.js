@@ -1,49 +1,67 @@
-import { Buffer } from 'safe-buffer';
+import { mnemonicToSeedSync, validateMnemonic } from 'bip39';
+import { BIP32Factory } from 'bip32';
+import * as ecc from 'tiny-secp256k1';
 import bs58check from 'bs58check';
-import bip39 from 'bip39';
-import bip32 from 'bip32';
-// Kullanım
-const mnemonic = 'mnomonicler buraya yazılacak';
-const derivationPath = "m/44'/12586'/0'/0";
+ 
+const mnemonic = 'mnononic phrase';
+const MINA_COIN_TYPE = 12586;
+const PURPOSE = 44;
 
-function reverse(bytes) {
-  const reversed = new Buffer(bytes.length);
-  for (let i = bytes.length; i > 0; i--) {
-      reversed[bytes.length - i] = bytes[i - 1];
-  }
-  return reversed;
+const bip32 = BIP32Factory(ecc);
+ 
+
+function getHDpath(account = 0, index = 0) {
+  // Mina standard derivation path: m/44'/12586'/account'/0/index
+  return `m/${PURPOSE}'/${MINA_COIN_TYPE}'/${account}'/0/${index}`;
 }
-async function generateMinaPrivateKey(mnemonic, derivationPath) {
-  if (!bip39.validateMnemonic(mnemonic)) {
-    throw new Error('Geçersiz mnemonic kelimeler.');
+
+function reverseBytes(buffer) {
+  const arr = new Uint8Array(buffer);
+  arr.reverse();
+  return Buffer.from(arr);
+}
+
+export async function importWalletByMnemonic(mnemonic, index = 0) {
+  if (!validateMnemonic(mnemonic)) {
+    throw new Error("Invalid mnemonic phrase");
   }
 
-  // Mnemonic'ten seed oluşturma
-  const seed = await bip39.mnemonicToSeed(mnemonic);
+  // Seed türetme
+  const seed = mnemonicToSeedSync(mnemonic);
   const root = bip32.fromSeed(seed);
 
-  // Mina derivation path takip edilerek child private key türetilir
-  const child = root.derivePath(derivationPath);
-      // İlk baytın maskeleme işlemi
-      child.privateKey[0] &= 0x3f;
-      const reversedPrivateKey = reverse(child.privateKey);
+  // Derivation path oluşturma
+  const path = getHDpath(index, 0);
+  const child = root.derivePath(path);
 
-  // Mina özel anahtar ön eki ekleme
-  const privateKeyHex = `5a01${reversedPrivateKey.toString('hex')}`;
+  if (!child.privateKey) {
+    throw new Error("Unable to derive private key");
+  }
 
-  // BASE58CHECK formatına dönüştürme
-  const privateKey = bs58check.encode(Buffer.from(privateKeyHex, 'hex'));
+  // İlk byte maskesi
+  child.privateKey[0] &= 0x3f;
 
-  console.log('Mina Private Key (BASE58):', privateKey);
-  return privateKey;
+  // Özel anahtarı ters çevirme ve '5a01' ön ekini ekleme
+  const reversedKey = reverseBytes(child.privateKey);
+  const privateKeyHex = `5a01${reversedKey.toString('hex')}`;
+  const privateKeyBase58 = bs58check.encode(Buffer.from(privateKeyHex, 'hex'));
+
+  // Public key türetme
+ 
+
+  return {
+    priKey: privateKeyBase58,
+ 
+    hdIndex: index
+  };
 }
 
 
-
-generateMinaPrivateKey(mnemonic, derivationPath)
-  .then((privateKey) => {
-    console.log('Türetilen Private Key:', privateKey);
+importWalletByMnemonic(mnemonic)
+  .then(wallet => {
+    console.log('Private Key (BASE58):', wallet.priKey);
+ 
   })
-  .catch((error) => {
-    console.error('Hata:', error.message);
+  .catch(error => {
+    console.error('ERROR:', error.message);
   });
